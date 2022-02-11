@@ -1,122 +1,185 @@
-dir.create("~/Week03Lab03/")
-setwd("~/Week03Lab03/")
-# The solution to last weeks lab solution: 
-# https://drive.google.com/open?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB
-# a handy trick in google docs is the export=download parameter option 
-# https://docs.google.com/a/vt.edu/uc?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB&export=download
-# becomes: 
-url="https://docs.google.com/a/vt.edu/uc?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB&export=download"
-# This will grab the solution for last weeks Lab02 Homework
-download.file(url,"Lab02_HW1_Solution.R")
-file.edit("Lab02_HW1_Solution.R")
+### BSE 4304 Lab 03
+### Author: Sarah Loomis
+### Date: February 11th 2022
 
+## Loading in Libraries
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(rnoaa,EcoHydRology,lattice,ggplot2)
 
+## Calculating NSE, set up function for calibration
+NSE=function(Yobs,Ysim){
+  return(1-sum((Yobs-Ysim)^2, na.rm=TRUE)/sum((Yobs-mean(Yobs, na.rm=TRUE))^2, na.rm=TRUE))
+}
 
- SFTmp = 1  # referred to as SFTMP in SWAT input (Table 1)
- bmlt6 = 4.5   # referred to as SMFMX in SWAT input (Table 1)
- bmlt12 = 0.0  # referred to as SMFMN in SWAT input adjusted for season
- Tmlt = SFTmp  # Assumed to be same as SnowFall Temperature
- Tlag = 1  # referred to as TIMP in SWAT input (Table 1)
- TMWB$AvgTemp=(TMWB$MaxTemp + TMWB$MinTemp)/2
-   TMWB$bmlt = (bmlt6 + bmlt12)/2 + (bmlt6 - bmlt12)/2 *  sin(2*pi/365*(julian(TMWB$date,origin = as.Date("2000-01-01"))-81))
-# Initialize SNO, Tsno as well as the first values of each
- TMWB$SNO = 0  # Snow Depth (mm)
- TMWB$Tsno = 0  # Snow Temp (C)
- TMWB$SNOmlt = 0  # Snow Melt (mm)
- attach(TMWB)
- for (t in 2:length(date)){
+## USGS Gage and Weather Data
+myflowgage_id="04235000"
+myflowgage=get_usgs_gage(myflowgage_id,
+                         begin_date="2016-01-01",end_date="2022-02-09")
+myflowgage$flowdata$flowmm=myflowgage$flowdata$flow/myflowgage$area/10^3
+# normalize flow data to be in mm of flow
+
+stns=meteo_distance(
+  station_data=ghcnd_stations(),
+  lat=myflowgage$declat,
+  long=myflowgage$declon,
+  units = "deg",
+  radius = 30,
+  limit = NULL
+)
+
+WXStn=stns[stns$element=="TMAX"&stns$last_year>=2021,]$id[1]
+WXData=meteo_pull_monitors(
+  monitors=WXStn,
+  keep_flags = FALSE,
+  date_min = "2016-01-01",
+  date_max = NULL,
+  var = c("TMAX","TMIN","PRCP")
+)
+WXData$prcp=WXData$prcp/10
+# adjusts tenths of mm to mm precipitation
+
+## Merging and creating TMWB dataset (same as Lab02)
+modeldata=merge(WXData, myflowgage$flowdata, by.x="date", by.y="mdate")
+names(modeldata)[names(modeldata) == "flowmm"] <- "Qmm"
+names(modeldata)[names(modeldata) == "prcp"] <- "P"
+names(modeldata)[names(modeldata) == "tmax"] <- "MaxTemp"
+names(modeldata)[names(modeldata) == "tmin"] <- "MinTemp"
+modeldata$MaxTemp=modeldata$MaxTemp/10
+modeldata$MinTemp=modeldata$MinTemp/10
+modeldata$MinTemp[is.na(modeldata$MinTemp)]=0
+modeldata$MaxTemp[is.na(modeldata$MaxTemp)]=modeldata$MinTemp[is.na(modeldata$MaxTemp)] +1
+modeldata$P[is.na(modeldata$P)]=0
+# adjusts tenths of degC to degC
+TMWB=modeldata
+
+## Using SnowMelt function to test different slopes/aspects
+attach(TMWB)
+SNO_Energy1=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                    slope = atan(0/100),
+                    aspect = 0*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                    SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                    startingSnowDensity_kg_m3=450)
+SNO_Energy2=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                     slope = atan(10/100),
+                     aspect = 0*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                     SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                     startingSnowDensity_kg_m3=450)
+SNO_Energy3=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                     slope = atan(10/100),
+                     aspect = 180*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                     SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                     startingSnowDensity_kg_m3=450)
+SNO_Energy4=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                     slope = atan(45/100),
+                     aspect = 315*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                     SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                     startingSnowDensity_kg_m3=450)
+SNO_Energy5=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                     slope = atan(45/100),
+                     aspect = 225*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                     SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                     startingSnowDensity_kg_m3=450)
+detach(TMWB)
+
+## Plotting for HW 1
+ggplot() +
+  geom_line(data=SNO_Energy1,aes(x=Date, y=SnowWaterEq_mm, colour ="0% Slope, N Facing"), size=1) +
+  geom_line(data=SNO_Energy2,aes(x=Date, y=SnowWaterEq_mm, colour ="10% Slope, N Facing"), size=1) +
+  geom_line(data=SNO_Energy3,aes(x=Date, y=SnowWaterEq_mm, colour ="10% Slope, S Facing"), size=1) +
+  geom_line(data=SNO_Energy4,aes(x=Date, y=SnowWaterEq_mm, colour ="45% Slope, NW Facing"), size=1) +
+  geom_line(data=SNO_Energy5,aes(x=Date, y=SnowWaterEq_mm, colour ="45% Slope, SW Facing"), size=1) +
+  ylab("Snow Water Equivalent (mm)") + ggtitle("USGS Gage 04235000 – Canandaigua Outlet at Chapin NY")
+  
+## Define function for HW 2 calibration
+SAF=function(fcres=0.3,SFTmp = 1,bmlt6 = 4.5,bmlt12 = 0.0,Tlag = 1){
+  
+## Calculate melt factor
+#SFTmp = 1 #snowfall temp in degC
+#bmlt6 = 4.5 #melt factor for snow on 6/21 (mm water / degC*day)
+#bmlt12 = 0  #melt factor for snow on 12/21 (mm water / degC*day)
+#Tlag = 1  #snow pack temperature lag factor
+Tmlt = SFTmp  # Assumed to be same as SnowFall Temperature
+TMWB$AvgTemp=(TMWB$MaxTemp + TMWB$MinTemp)/2
+TMWB$bmlt = (bmlt6 + bmlt12)/2 + (bmlt6 - bmlt12)/2 *  sin(2*pi/365*(julian(TMWB$date,origin = as.Date("2000-01-01"))-81))
+  # calculates melt factor based on eqn. 1:2.5.3
+
+## Initialize SNO, Tsno as well as the first values of each
+TMWB$SNO = 0  # Snow Depth (mm)
+TMWB$Tsno = 0  # Snow Temp (C)
+TMWB$SNOmlt = 0  # Snow Melt (mm)
+attach(TMWB)
+for (t in 2:length(date)){
   Tsno[t]= Tsno[t-1] * (1.0-Tlag) +  AvgTemp[t] * Tlag
+    # calculates snow pack temp based on eqn 1:2.5.1
   if(AvgTemp[t] < SFTmp){
     SNO[t]= SNO[t-1] + P[t]
+      # if the average temp is less than snowfall temp, snow depth is previous day's snow depth plus current precipitation
   }  else {
+      # if the average temp is greater than snowfall temp
     SNOmlt[t]= bmlt[t] * SNO[t-1] * ((Tsno[t]+MaxTemp[t])/2 - Tmlt) 
+      # calculates snowmelt based on eqn 1:2.5.2
     SNOmlt[t]= min(SNOmlt[t],SNO[t-1])
+      # snowmelt is the smaller of snowmelt or previous day's snow depth
     SNO[t]= SNO[t-1] -SNOmlt[t]
+      # snow depth = previous day's snow depth minus today's snowmelt
   }
-  print(t)
 }
- plot(date,SNO,type="l")
- detach(TMWB)
- TMWB$Tsno=Tsno
- TMWB$SNO=SNO
- TMWB$SNOmlt=SNOmlt
- rm(list=c("SNO", "SNOmlt", "Tsno"))
+detach(TMWB)
+TMWB$Tsno=Tsno
+TMWB$SNO=SNO
+TMWB$SNOmlt=SNOmlt
+rm(list=c("SNO", "SNOmlt", "Tsno"))
 
-  bmlt12 = 0.0
-  bmlt6 = 3
-  SFTmp = 7
-  TMWB$bmlt = (bmlt6 + bmlt12)/2 + (bmlt6 - bmlt12)/2 *  sin(2*pi/365*(julian(TMWB$date,origin = as.Date("2000-01-01"))-81))
- # Initialize SNO, Tsno as well as the first values of each
-  TMWB$SNO = 0  # Snow Depth (mm)
-  TMWB$Tsno = 0  # Snow Temp (C)
-  TMWB$SNOmlt = 0  # Snow Melt (mm)
-  attach(TMWB)
-  for (t in 2:length(date)){
-   Tsno[t]= Tsno[t-1] * (1.0-Tlag) +  AvgTemp[t] * Tlag
-   if(AvgTemp[t] < SFTmp){
-     SNO[t]= SNO[t-1] + P[t]
-   }  else {
-     SNOmlt[t]= bmlt[t] * SNO[t-1] * ((Tsno[t]+MaxTemp[t])/2 - Tmlt) 
-     SNOmlt[t]= min(SNOmlt[t],SNO[t-1])
-     SNO[t]= SNO[t-1] -SNOmlt[t]
-   }
-   print(t)
- }
-  lines(date,SNO,col="red")
-  detach(TMWB)
-  TMWB$Tsno=Tsno
-  TMWB$SNO=SNO
-  TMWB$SNOmlt=SNOmlt
-  rm(list=c("SNO", "SNOmlt", "Tsno"))
-  
-  # notice that there is an Energy Balance based Snow Accumulation 
-  # and Melt model in the EcoHydRology package.
-   ?SnowMelt
-   attach(TMWB)
-   SNO_Energy=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
-                        slope = 0,
-                        aspect = 0, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
-                        SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
-                        startingSnowDensity_kg_m3=450)
-  # How do we know what units slope and aspect are in? (view function)
-   lines(date,SNO_Energy$SnowWaterEq_mm)
-   detach(TMWB)
-  
+## Estimate PET using Albedo
 TMWB$Albedo=.23
-TMWB$Albedo[TMWB$SNO>0]=.95 # if there is snow, albedo is higher
-?PET_fromTemp # units in meters
+  # albedo = 0.23 if there's no snow
+TMWB$Albedo[TMWB$SNO>0]=.95
+  # albedo = 0.95 if there is snow
 attach(TMWB)
 PET=PET_fromTemp(Jday=(1+as.POSIXlt(date)$yday),Tmax_C = MaxTemp,Tmin_C = MinTemp,albedo=Albedo,lat_radians = myflowgage$declat*pi/180) * 1000
-# multiply by 1000 for mm
 TMWB$PET=PET
 plot(date,PET)
 detach(TMWB)
 rm(list=c("PET"))
 
-myflowgage$FldCap=.45
-myflowgage$WiltPt=.15
-myflowgage$Z=1000
-TMWB$AWC=(myflowgage$FldCap-myflowgage$WiltPt)*myflowgage$Z # 
-TMWB$dP = 0 # Initializing Net Precipitation
-TMWB$ET = 0 # Initializing ET
-TMWB$AW = 0 # Initializing AW
-TMWB$Excess = 0 # Initializing Excess
+## Initializaing AWC, Net Precip, ET, AW, and Excess
+#myflowgage$FldCap=.45
+#myflowgage$WiltPt=.15
+#myflowgage$Z=1000
+TMWB$AWC=350 
+TMWB$dP = 0 
+TMWB$ET = 0 
+TMWB$AW = 0 
+TMWB$Excess = 0
 
+soilwetting<-function(AWprev,dP_func,AWC_func){
+  AW_func<-AWprev+dP_func
+  excess_func<-0.0
+  c(AW_func,excess_func)
+} 
 
-# Loop to calculate AW and Excess
+soildrying<-function(AWprev,dP_func,AWC_func){
+  AW_func=AWprev*exp(dP_func/AWC_func)
+  excess_func<-0.0
+  c(AW_func,excess_func)
+}
+# soil_wetting_above_capacity function
+soil_wetting_above_capacity<-function(AWprev,dP_func,AWC_func){
+  AW_func<-AWC_func
+  excess_func<-AWprev+dP_func-AWC_func
+  c(AW_func,excess_func)
+}
+
+## Loop to calculate AW and Excess, this time using PET calculated earlier
 attach(TMWB)
 for (t in 2:length(AW)){
- #This is where Net Precipitation is now calculated
-  # Do you remember what Net Precip is? Refer to week 2 notes
   ET[t] = min (AW[t-1],PET[t])
-  ET[t] = (AW[t-1]/AWC[t-1])*PET[t] # New Model - how much water in soil profile
+  ET[t] = (AW[t-1]/AWC[t-1])*PET[t] 
   if(AvgTemp[t] >= SFTmp){
     dP[t] = P[t] - ET[t] + SNOmlt[t] 
   }  else {
     dP[t] = ET[t]
   }
-
-  # From here onward, everything is the same as Week2’s lab
   if (dP[t]<=0) {
     values<-soildrying(AW[t-1],dP[t],AWC[t])
   } else if((dP[t]>0) & (AW[t-1]+dP[t])<=AWC[t]) {
@@ -126,33 +189,29 @@ for (t in 2:length(AW)){
   }
   AW[t]<-values[1]
   Excess[t]<-values[2]
-  print(t)
 }
 TMWB$AW=AW
 TMWB$Excess=Excess
 TMWB$dP=dP
 rm(list=c("AW","dP","ET", "Excess"))
-detach(TMWB) # IMPORTANT TO DETACH
+detach(TMWB)
 
+## Calculating predicted flow and storage
 TMWB$Qpred=NA
 TMWB$Qpred[1]=0
 TMWB$S=NA
 TMWB$S[1]=0
 attach(TMWB)
-fcres=.3
+#fcres=.3
 for (t in 2:length(date)){
   S[t]=S[t-1]+Excess[t]     
   Qpred[t]=fcres*S[t]
   S[t]=S[t]-Qpred[t]
 }
 TMWB$S=S
-TMWB$Qpred=Qpred # UPDATE vector BEFORE DETACHING
-
-#Make a plot that has Qmm, P,and Qpred over time
-plot(date,P,col="black")
-lines(date,Qmm,type = "l",col="black")
-lines(date,Qpred,col="blue")
-detach(TMWB) # IMPORTANT TO DETACH
+TMWB$Qpred=Qpred 
+detach(TMWB) 
 rm(list=c("Qpred","S"))
 
-   
+return(NSE(TMWB$Qmm,TMWB$Qpred))
+}
