@@ -36,14 +36,14 @@ mybbox=c(mysoil@bbox)
 # First associate mukey with cokey from component
 mysoil$mukey=mysoil$MUKEY  # or rename the column
 mukey_statement = format_SQL_in_statement(unique(mysoil$mukey))
-print(mukey_statement)
+#print(mukey_statement)
 q_mu2co = paste("SELECT mukey,cokey FROM component WHERE mukey IN ", mukey_statement, sep="")
-print(q_mu2co)
+#print(q_mu2co)
 mu2co = SDA_query(q_mu2co)
 # Second associate cokey with ksat_r,awc_r,hzdepb_r from chorizon
 cokey_statement = format_SQL_in_statement(unique(mu2co$cokey))
 q_co2ch = paste("SELECT cokey,ksat_r,awc_r,hzdepb_r  FROM chorizon WHERE cokey IN ", cokey_statement, sep="")
-print(q_co2ch)
+#print(q_co2ch)
 co2ch = SDA_query(q_co2ch)
 # Last, bring them back together, and aggregate based on max values
 # of ksat_r,awc_r, and hzdepb_r
@@ -59,10 +59,10 @@ mydem=get_elev_raster(locations=mysoil,
 
 summary(terrain(mydem, opt='slope',unit = "degrees"))
 # What is this 'slope'? Use the man page for the terrain() function to answer
-plot(terrain(mydem, opt='TPI',unit = "degrees"))
+#plot(terrain(mydem, opt='TPI',unit = "degrees"))
 # What is this 'TPI'? 
 summary(terrain(mydem, opt='TRI',unit = "degrees"))
-plot(terrain(mydem, opt='TRI',unit = "degrees"))
+#plot(terrain(mydem, opt='TRI',unit = "degrees"))
 # What is this 'TRI'? 
 
 stns=meteo_distance(
