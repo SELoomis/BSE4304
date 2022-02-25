@@ -1,0 +1,66 @@
+source("https://raw.githubusercontent.com/vtdrfuka/BSE5304_2022/main/functions/TMWBmodel.R")
+myflowgage_id_ny="0423205010"
+myflowgage_ny=get_usgs_gage(myflowgage_id_ny,
+                            begin_date="2016-01-01",end_date="2022-02-09")
+myflowgage_ny$flowdata$flowmm=myflowgage_ny$flowdata$flow/myflowgage_ny$area/10^3
+# normalize flow data to be in mm of flow
+
+stns_ny=meteo_distance(
+  station_data=ghcnd_stations(),
+  lat=myflowgage_ny$declat,
+  long=myflowgage_ny$declon,
+  units = "deg",
+  radius = 30,
+  limit = NULL
+)
+
+WXStn_ny=stns_ny[stns_ny$element=="TMAX"&stns_ny$last_year>=2021,]$id[1]
+WXData_ny=meteo_pull_monitors(
+  monitors=WXStn_ny,
+  keep_flags = FALSE,
+  date_min = "2016-01-01",
+  date_max = NULL,
+  var = c("TMAX","TMIN","PRCP")
+)
+WXData_ny$prcp=WXData_ny$prcp/10
+# adjusts tenths of mm to mm precipitation
+
+## Merging and creating TMWB dataset (same as Lab02)
+modeldata_ny=merge(WXData_ny, myflowgage_ny$flowdata, by.x="date", by.y="mdate")
+names(modeldata_ny)[names(modeldata_ny) == "flowmm"] <- "Qmm"
+names(modeldata_ny)[names(modeldata_ny) == "prcp"] <- "P"
+names(modeldata_ny)[names(modeldata_ny) == "tmax"] <- "MaxTemp"
+names(modeldata_ny)[names(modeldata_ny) == "tmin"] <- "MinTemp"
+modeldata_ny$MaxTemp=modeldata_ny$MaxTemp/10
+modeldata_ny$MinTemp=modeldata_ny$MinTemp/10
+modeldata_ny$MinTemp[is.na(modeldata_ny$MinTemp)]=0
+modeldata_ny$MaxTemp[is.na(modeldata_ny$MaxTemp)]=modeldata_ny$MinTemp[is.na(modeldata_ny$MaxTemp)] +1
+modeldata_ny$P[is.na(modeldata_ny$P)]=0
+modeldata_ny$AvgTemp=(modeldata_ny$MaxTemp+modeldata_ny$MinTemp)/2.0
+# adjusts tenths of degC to degC
+TMWB2=modeldata_ny
+
+TMWB2new=TMWBmodel(TMWB=TMWB2,fcres=.3,SFTmp = 9,Tlag = .5,AWCval = 100)
+
+TMWB2new$Qpred=NA
+TMWB2new$Qpred[1]=0
+attach(TMWB2new)
+#fcres=.3
+for (t in 2:length(date)){
+  S[t]=S[t-1]+Excess[t]     
+  Qpred[t]=fcres*S[t]
+  S[t]=S[t]-Qpred[t]
+}
+TMWB2new$S=S
+TMWB2new$Qpred=Qpred 
+detach(TMWB2new) 
+rm(list=c("Qpred","S"))
+
+attach(TMWB2new)
+SNO_Energy_ny=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage_ny$declat, 
+                     slope = atan(0/100),
+                     aspect = 0*(pi/180), tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                     SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                     startingSnowDensity_kg_m3=450)
+detach(TMWB2new)
+
